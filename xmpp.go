@@ -18,11 +18,10 @@ import (
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/binary"
 	"encoding/xml"
-	"errors"
 	"fmt"
+	"github.com/pkg/errors"
 	"io"
 	"log"
 	"math/big"
@@ -144,13 +143,10 @@ type Options struct {
 	// Default the port to 5222.
 	Host string
 
-	VHost string
+	Domain string
 
-	// User specifies what user to authenticate to the remote server. (should NOT include vhost)
-	User string
-
-	// Password supplies the password to use for authentication with the remote server.
-	Password string
+	// Available Auth Mechanisms
+	AuthMechanisms []Mechanism
 
 	// Resource specifies an XMPP client resource, like "bot", instead of accepting one
 	// from the server.  Use "" to let the server generate one for your client.
@@ -244,28 +240,37 @@ func (o Options) NewClient() (*Client, error) {
 }
 
 // NewClient creates a new connection to a host given as "hostname" or "hostname:port".
-// If host is not specified, the  DNS SRV should be used to find the host from the domainpart of the JID.
 // Default the port to 5222.
-func NewClient(host, user, passwd string, debug bool) (*Client, error) {
+func NewClient(host, vhost, user, passwd string, debug bool) (*Client, error) {
 	opts := Options{
-		Host:     host,
-		User:     user,
-		Password: passwd,
-		Debug:    debug,
-		Session:  false,
+		Host:   host,
+		Domain: vhost,
+		AuthMechanisms: []Mechanism{
+			&PlainMechanism{
+				user: user,
+				pass: passwd,
+			},
+		},
+		Debug:   debug,
+		Session: false,
 	}
 	return opts.NewClient()
 }
 
 // NewClientNoTLS creates a new client without TLS
-func NewClientNoTLS(host, user, passwd string, debug bool) (*Client, error) {
+func NewClientNoTLS(host, vhost, user, passwd string, debug bool) (*Client, error) {
 	opts := Options{
-		Host:     host,
-		User:     user,
-		Password: passwd,
-		NoTLS:    true,
-		Debug:    debug,
-		Session:  false,
+		Host:   host,
+		Domain: vhost,
+		AuthMechanisms: []Mechanism{
+			&PlainMechanism{
+				user: user,
+				pass: passwd,
+			},
+		},
+		NoTLS:   true,
+		Debug:   debug,
+		Session: false,
 	}
 	return opts.NewClient()
 }
@@ -308,18 +313,11 @@ func cnonce() string {
 }
 
 func (c *Client) init(o *Options) error {
-
-	var domain string
-	var user string
-	a := strings.SplitN(o.User, "@", 2)
-	if len(o.User) > 0 {
-		if len(a) != 2 {
-			return errors.New("xmpp: invalid username (want user@domain): " + o.User)
-		}
-		user = a[0]
-		domain = a[1]
-	} // Otherwise, we'll be attempting ANONYMOUS
-
+	mechanisms := map[string]Mechanism{}
+	for _, mech := range o.AuthMechanisms {
+		mechanisms[mech.Name()] = mech
+	}
+	domain := o.Domain
 	// Declare intent to be a jabber client and gather stream features.
 	f, err := c.startStream(o, domain)
 	if err != nil {
@@ -331,98 +329,21 @@ func (c *Client) init(o *Options) error {
 		return err
 	}
 
-	if o.User == "" && o.Password == "" {
-		foundAnonymous := false
-		for _, m := range f.Mechanisms.Mechanism {
-			if m == "ANONYMOUS" {
-				fmt.Fprintf(c.conn, "<auth xmlns='%s' mechanism='ANONYMOUS' />\n", nsSASL)
-				foundAnonymous = true
-				break
+	usedMechanism := ""
+	for _, m := range f.Mechanisms.Mechanism {
+		if mech, ok := mechanisms[m]; ok {
+			usedMechanism = m
+			err := mech.DoAuth(c.p, c.conn)
+			if err != nil {
+				return errors.Wrap(err, "failed to auth")
 			}
-		}
-		if !foundAnonymous {
-			return fmt.Errorf("ANONYMOUS authentication is not an option and username and password were not specified")
-		}
-	} else {
-		// Even digest forms of authentication are unsafe if we do not know that the host
-		// we are talking to is the actual server, and not a man in the middle playing
-		// proxy.
-		if !c.IsEncrypted() && !o.InsecureAllowUnencryptedAuth {
-			return errors.New("refusing to authenticate over unencrypted TCP connection")
-		}
-
-		mechanism := ""
-		for _, m := range f.Mechanisms.Mechanism {
-			if m == "X-OAUTH2" && o.OAuthToken != "" && o.OAuthScope != "" {
-				mechanism = m
-				// Oauth authentication: send base64-encoded \x00 user \x00 token.
-				raw := "\x00" + user + "\x00" + o.OAuthToken
-				enc := make([]byte, base64.StdEncoding.EncodedLen(len(raw)))
-				base64.StdEncoding.Encode(enc, []byte(raw))
-				fmt.Fprintf(c.conn, "<auth xmlns='%s' mechanism='X-OAUTH2' auth:service='oauth2' "+
-					"xmlns:auth='%s'>%s</auth>\n", nsSASL, o.OAuthXmlNs, enc)
-				break
-			}
-			if m == "PLAIN" {
-				mechanism = m
-				// Plain authentication: send base64-encoded \x00 user \x00 password.
-				raw := "\x00" + user + "\x00" + o.Password
-				enc := make([]byte, base64.StdEncoding.EncodedLen(len(raw)))
-				base64.StdEncoding.Encode(enc, []byte(raw))
-				fmt.Fprintf(c.conn, "<auth xmlns='%s' mechanism='PLAIN'>%s</auth>\n", nsSASL, enc)
-				break
-			}
-			if m == "DIGEST-MD5" {
-				mechanism = m
-				// Digest-MD5 authentication
-				fmt.Fprintf(c.conn, "<auth xmlns='%s' mechanism='DIGEST-MD5'/>\n", nsSASL)
-				var ch saslChallenge
-				if err = c.p.DecodeElement(&ch, nil); err != nil {
-					return errors.New("unmarshal <challenge>: " + err.Error())
-				}
-				b, err := base64.StdEncoding.DecodeString(string(ch))
-				if err != nil {
-					return err
-				}
-				tokens := map[string]string{}
-				for _, token := range strings.Split(string(b), ",") {
-					kv := strings.SplitN(strings.TrimSpace(token), "=", 2)
-					if len(kv) == 2 {
-						if kv[1][0] == '"' && kv[1][len(kv[1])-1] == '"' {
-							kv[1] = kv[1][1 : len(kv[1])-1]
-						}
-						tokens[kv[0]] = kv[1]
-					}
-				}
-				realm, _ := tokens["realm"]
-				nonce, _ := tokens["nonce"]
-				qop, _ := tokens["qop"]
-				charset, _ := tokens["charset"]
-				cnonceStr := cnonce()
-				digestURI := "xmpp/" + domain
-				nonceCount := fmt.Sprintf("%08x", 1)
-				digest := saslDigestResponse(user, realm, o.Password, nonce, cnonceStr, "AUTHENTICATE", digestURI, nonceCount)
-				message := "username=\"" + user + "\", realm=\"" + realm + "\", nonce=\"" + nonce + "\", cnonce=\"" + cnonceStr +
-					"\", nc=" + nonceCount + ", qop=" + qop + ", digest-uri=\"" + digestURI + "\", response=" + digest + ", charset=" + charset
-
-				fmt.Fprintf(c.conn, "<response xmlns='%s'>%s</response>\n", nsSASL, base64.StdEncoding.EncodeToString([]byte(message)))
-
-				var rspauth saslRspAuth
-				if err = c.p.DecodeElement(&rspauth, nil); err != nil {
-					return errors.New("unmarshal <challenge>: " + err.Error())
-				}
-				b, err = base64.StdEncoding.DecodeString(string(rspauth))
-				if err != nil {
-					return err
-				}
-				fmt.Fprintf(c.conn, "<response xmlns='%s'/>\n", nsSASL)
-				break
-			}
-		}
-		if mechanism == "" {
-			return fmt.Errorf("PLAIN authentication is not an option: %v", f.Mechanisms.Mechanism)
 		}
 	}
+
+	if usedMechanism == "" {
+		return errors.New("not suitable auth mechanism found")
+	}
+
 	// Next message should be either success or failure.
 	name, val, err := next(c.p)
 	if err != nil {
