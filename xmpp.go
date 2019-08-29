@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"net"
 	"net/http"
@@ -76,14 +77,11 @@ func containsIgnoreCase(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
 
-func connect(host, user, passwd string) (net.Conn, error) {
+func connect(host string) (net.Conn, error) {
 	addr := host
 
 	if strings.TrimSpace(host) == "" {
-		a := strings.SplitN(user, "@", 2)
-		if len(a) == 2 {
-			addr = a[1]
-		}
+		return nil, errors.New("invalid host option")
 	}
 	a := strings.SplitN(host, ":", 2)
 	if len(a) == 1 {
@@ -143,11 +141,12 @@ func connect(host, user, passwd string) (net.Conn, error) {
 // Options are used to specify additional options for new clients, such as a Resource.
 type Options struct {
 	// Host specifies what host to connect to, as either "hostname" or "hostname:port"
-	// If host is not specified, the  DNS SRV should be used to find the host from the domainpart of the JID.
 	// Default the port to 5222.
 	Host string
 
-	// User specifies what user to authenticate to the remote server.
+	VHost string
+
+	// User specifies what user to authenticate to the remote server. (should NOT include vhost)
 	User string
 
 	// Password supplies the password to use for authentication with the remote server.
@@ -199,7 +198,7 @@ type Options struct {
 // NewClient establishes a new Client connection based on a set of Options.
 func (o Options) NewClient() (*Client, error) {
 	host := o.Host
-	c, err := connect(host, o.User, o.Password)
+	c, err := connect(host)
 	if err != nil {
 		return nil, err
 	}
