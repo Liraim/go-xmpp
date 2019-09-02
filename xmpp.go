@@ -34,12 +34,12 @@ import (
 )
 
 const (
-	nsStream  = "http://etherx.jabber.org/streams"
-	nsTLS     = "urn:ietf:params:xml:ns:xmpp-tls"
-	nsSASL    = "urn:ietf:params:xml:ns:xmpp-sasl"
-	nsBind    = "urn:ietf:params:xml:ns:xmpp-bind"
-	nsClient  = "jabber:client"
-	nsSession = "urn:ietf:params:xml:ns:xmpp-session"
+	NsStream  = "http://etherx.jabber.org/streams"
+	NsTLS     = "urn:ietf:params:xml:ns:xmpp-tls"
+	NsSASL    = "urn:ietf:params:xml:ns:xmpp-sasl"
+	NsBind    = "urn:ietf:params:xml:ns:xmpp-bind"
+	NsClient  = "jabber:client"
+	NsSession = "urn:ietf:params:xml:ns:xmpp-session"
 )
 
 // Default TLS configuration options
@@ -108,9 +108,9 @@ func connect(host string) (net.Conn, error) {
 		}
 	}
 	if proxy != "" {
-		url, err := url.Parse(proxy)
+		proxyUrl, err := url.Parse(proxy)
 		if err == nil {
-			addr = url.Host
+			addr = proxyUrl.Host
 		}
 	}
 
@@ -120,9 +120,9 @@ func connect(host string) (net.Conn, error) {
 	}
 
 	if proxy != "" {
-		fmt.Fprintf(c, "CONNECT %s HTTP/1.1\r\n", host)
-		fmt.Fprintf(c, "Host: %s\r\n", host)
-		fmt.Fprintf(c, "\r\n")
+		_, _ = fmt.Fprintf(c, "CONNECT %s HTTP/1.1\r\n", host)
+		_, _ = fmt.Fprintf(c, "Host: %s\r\n", host)
+		_, _ = fmt.Fprintf(c, "\r\n")
 		br := bufio.NewReader(c)
 		req, _ := http.NewRequest("CONNECT", host, nil)
 		resp, err := http.ReadResponse(br, req)
@@ -232,7 +232,7 @@ func (o Options) NewClient() (*Client, error) {
 	}
 
 	if err := client.init(&o); err != nil {
-		client.Close()
+		_ = client.Close()
 		return nil, err
 	}
 
@@ -374,9 +374,9 @@ func (c *Client) init(o *Options) error {
 
 	// Send IQ message asking to bind to the local user name.
 	if o.Resource == "" {
-		fmt.Fprintf(c.conn, "<iq type='set' id='%x'><bind xmlns='%s'></bind></iq>\n", cookie, nsBind)
+		fmt.Fprintf(c.conn, "<iq type='set' id='%x'><bind xmlns='%s'></bind></iq>\n", cookie, NsBind)
 	} else {
-		fmt.Fprintf(c.conn, "<iq type='set' id='%x'><bind xmlns='%s'><resource>%s</resource></bind></iq>\n", cookie, nsBind, o.Resource)
+		fmt.Fprintf(c.conn, "<iq type='set' id='%x'><bind xmlns='%s'><resource>%s</resource></bind></iq>\n", cookie, NsBind, o.Resource)
 	}
 	var iq clientIQ
 	if err = c.p.DecodeElement(&iq, nil); err != nil {
@@ -390,7 +390,7 @@ func (c *Client) init(o *Options) error {
 
 	if o.Session {
 		//if server support session, open it
-		fmt.Fprintf(c.conn, "<iq to='%s' type='set' id='%x'><session xmlns='%s'/></iq>", xmlEscape(domain), cookie, nsSession)
+		fmt.Fprintf(c.conn, "<iq to='%s' type='set' id='%x'><session xmlns='%s'/></iq>", xmlEscape(domain), cookie, NsSession)
 	}
 
 	// We're connected and can now receive and send messages.
@@ -457,7 +457,7 @@ func (c *Client) startStream(o *Options, domain string) (*streamFeatures, error)
 	_, err := fmt.Fprintf(c.conn, "<?xml version='1.0'?>\n"+
 		"<stream:stream to='%s' xmlns='%s'\n"+
 		" xmlns:stream='%s' version='1.0'>\n",
-		xmlEscape(domain), nsClient, nsStream)
+		xmlEscape(domain), NsClient, NsStream)
 	if err != nil {
 		return nil, err
 	}
@@ -467,7 +467,7 @@ func (c *Client) startStream(o *Options, domain string) (*streamFeatures, error)
 	if err != nil {
 		return nil, err
 	}
-	if se.Name.Space != nsStream || se.Name.Local != "stream" {
+	if se.Name.Space != NsStream || se.Name.Local != "stream" {
 		return nil, fmt.Errorf("expected <stream> but got <%v> in %v", se.Name.Local, se.Name.Space)
 	}
 
@@ -820,37 +820,37 @@ func next(p *xml.Decoder) (xml.Name, interface{}, error) {
 	// Put it in an interface and allocate one.
 	var nv interface{}
 	switch se.Name.Space + " " + se.Name.Local {
-	case nsStream + " features":
+	case NsStream + " features":
 		nv = &streamFeatures{}
-	case nsStream + " error":
+	case NsStream + " error":
 		nv = &streamError{}
-	case nsTLS + " starttls":
+	case NsTLS + " starttls":
 		nv = &tlsStartTLS{}
-	case nsTLS + " proceed":
+	case NsTLS + " proceed":
 		nv = &tlsProceed{}
-	case nsTLS + " failure":
+	case NsTLS + " failure":
 		nv = &tlsFailure{}
-	case nsSASL + " mechanisms":
+	case NsSASL + " mechanisms":
 		nv = &saslMechanisms{}
-	case nsSASL + " challenge":
+	case NsSASL + " challenge":
 		nv = ""
-	case nsSASL + " response":
+	case NsSASL + " response":
 		nv = ""
-	case nsSASL + " abort":
+	case NsSASL + " abort":
 		nv = &saslAbort{}
-	case nsSASL + " success":
+	case NsSASL + " success":
 		nv = &saslSuccess{}
-	case nsSASL + " failure":
+	case NsSASL + " failure":
 		nv = &saslFailure{}
-	case nsBind + " bind":
+	case NsBind + " bind":
 		nv = &bindBind{}
-	case nsClient + " message":
+	case NsClient + " message":
 		nv = &clientMessage{}
-	case nsClient + " presence":
+	case NsClient + " presence":
 		nv = &clientPresence{}
-	case nsClient + " iq":
+	case NsClient + " iq":
 		nv = &clientIQ{}
-	case nsClient + " error":
+	case NsClient + " error":
 		nv = &clientError{}
 	default:
 		return xml.Name{}, nil, errors.New("unexpected XMPP message " +

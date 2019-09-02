@@ -19,6 +19,13 @@ type PlainMechanism struct {
 	pass string
 }
 
+func NewPlainMechanism(user, pass string) PlainMechanism {
+	return PlainMechanism{
+		user: user,
+		pass: pass,
+	}
+}
+
 func (p *PlainMechanism) Name() string {
 	return "PLAIN"
 }
@@ -27,7 +34,7 @@ func (p *PlainMechanism) DoAuth(_ *xml.Decoder, conn net.Conn) error {
 	raw := "\x00" + p.user + "\x00" + p.pass
 	enc := make([]byte, base64.StdEncoding.EncodedLen(len(raw)))
 	base64.StdEncoding.Encode(enc, []byte(raw))
-	_, err := fmt.Fprintf(conn, "<auth xmlns='%s' mechanism='%s'>%s</auth>\n", nsSASL, p.Name(), enc)
+	_, err := fmt.Fprintf(conn, "<auth xmlns='%s' mechanism='%s'>%s</auth>\n", NsSASL, p.Name(), enc)
 	return err
 }
 
@@ -46,7 +53,7 @@ func (o *OAuthMechanism) DoAuth(_ *xml.Decoder, conn net.Conn) error {
 	enc := make([]byte, base64.StdEncoding.EncodedLen(len(raw)))
 	base64.StdEncoding.Encode(enc, []byte(raw))
 	_, err := fmt.Fprintf(conn, "<auth xmlns='%s' mechanism='X-OAUTH2' auth:service='oauth2' "+
-		"xmlns:auth='%s'>%s</auth>\n", nsSASL, o.ns, enc)
+		"xmlns:auth='%s'>%s</auth>\n", NsSASL, o.ns, enc)
 	return err
 }
 
@@ -62,7 +69,7 @@ func (md *MD5DigestMechanism) Name() string {
 
 func (md *MD5DigestMechanism) DoAuth(p *xml.Decoder, conn net.Conn) error {
 	// Digest-MD5 authentication
-	_, err := fmt.Fprintf(conn, "<auth xmlns='%s' mechanism='DIGEST-MD5'/>\n", nsSASL)
+	_, err := fmt.Fprintf(conn, "<auth xmlns='%s' mechanism='DIGEST-MD5'/>\n", NsSASL)
 	if err != nil {
 		return errors.Wrap(err, "failed to write init MD5Digest response")
 	}
@@ -95,7 +102,7 @@ func (md *MD5DigestMechanism) DoAuth(p *xml.Decoder, conn net.Conn) error {
 	message := "username=\"" + md.user + "\", realm=\"" + realm + "\", nonce=\"" + nonce + "\", cnonce=\"" + cnonceStr +
 		"\", nc=" + nonceCount + ", qop=" + qop + ", digest-uri=\"" + digestURI + "\", response=" + digest + ", charset=" + charset
 
-	_, err = fmt.Fprintf(conn, "<response xmlns='%s'>%s</response>\n", nsSASL, base64.StdEncoding.EncodeToString([]byte(message)))
+	_, err = fmt.Fprintf(conn, "<response xmlns='%s'>%s</response>\n", NsSASL, base64.StdEncoding.EncodeToString([]byte(message)))
 	if err != nil {
 		return err
 	}
@@ -107,7 +114,7 @@ func (md *MD5DigestMechanism) DoAuth(p *xml.Decoder, conn net.Conn) error {
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(conn, "<response xmlns='%s'/>\n", nsSASL)
+	_, err = fmt.Fprintf(conn, "<response xmlns='%s'/>\n", NsSASL)
 	return err
 }
 
@@ -118,6 +125,6 @@ func (anon *AnonymousMechanism) Name() string {
 }
 
 func (anon *AnonymousMechanism) DoAuth(p *xml.Decoder, conn net.Conn) error {
-	_, err := fmt.Fprintf(conn, "<auth xmlns='%s' mechanism='ANONYMOUS' />\n", nsSASL)
+	_, err := fmt.Fprintf(conn, "<auth xmlns='%s' mechanism='ANONYMOUS' />\n", NsSASL)
 	return err
 }
