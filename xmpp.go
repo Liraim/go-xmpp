@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"github.com/pkg/errors"
 	"io"
-	"log"
 	"math/big"
 	"net"
 	"net/http"
@@ -519,11 +518,23 @@ type Presence struct {
 }
 
 type IQ struct {
-	ID    string
-	From  string
-	To    string
-	Type  string
-	Query []byte
+	XMLName xml.Name `xml:"iq"`
+	XmlNs   string   `xml:"xml_ns,attr,omitempty"`
+	ID      string   `xml:"id,attr"`
+	From    string   `xml:"from,attr"`
+	To      string   `xml:"to,attr"`
+	Type    string   `xml:"type,attr"`
+	Query   []byte   `xml:",innerxml"`
+}
+
+func NewIQ(from string, to string, iqType string, inner []byte) IQ {
+	return IQ{
+		ID:    cnonce(),
+		From:  from,
+		To:    to,
+		Type:  iqType,
+		Query: inner,
+	}
 }
 
 // Recv waits to receive the next XMPP stanza.
@@ -615,6 +626,12 @@ func (c *Client) SendHtml(chat Chat) (n int, err error) {
 func (c *Client) Roster() error {
 	fmt.Fprintf(c.conn, "<iq from='%s' type='get' id='roster1'><query xmlns='jabber:iq:roster'/></iq>\n", xmlEscape(c.jid))
 	return nil
+}
+
+func (c *Client) SendIQ(iq IQ) (n int, err error) {
+	data, err := xml.Marshal(iq)
+	//log.Printf("Send iq: %s", data)
+	return fmt.Fprint(c.conn, string(data))
 }
 
 // RFC 3920  C.1  Streams name space
